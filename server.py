@@ -1,45 +1,55 @@
+# This program was modified by [Michael R Newman] / [n01586930]
+
 import socket
 import argparse
+import struct
 
 def run_server(port, output_file):
-    # 1. Create a UDP socket
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    
-    # 2. Bind the socket to the port (0.0.0.0 means all interfaces)
     server_address = ('', port)
     print(f"[*] Server listening on port {port}")
     print(f"[*] Server will save each received file as 'received_<ip>_<port>.jpg' based on sender.")
     sock.bind(server_address)
-
-    # 3. Keep listening for new transfers
+    
+    exp_num = 0
+    f = None
     try:
         while True:
-            f = None
-            sender_filename = None
-            reception_started = False
-            while True:
-                data, addr = sock.recvfrom(4096)
-                # Protocol: If we receive an empty packet, it means "End of File"
-                if not data:
-                    print(f"[*] End of file signal received from {addr}. Closing.")
-                    break
-                if f is None:
-                    print("==== Start of reception ====")
-                    ip, sender_port = addr
-                    sender_filename = f"received_{ip.replace('.', '_')}_{sender_port}.jpg"
-                    f = open(sender_filename, 'wb')
-                    print(f"[*] First packet received from {addr}. File opened for writing as '{sender_filename}'.")
-                # Write data to disk
+            packet, addr = sock.recvfrom(4096)
+            if not packet:
+                
+                if f:
+                    f.close()
+                    f = None
+                    print(f"[*] End of file signal received from {addr}. File closed.")
+                exp_num = 0
+                continue
+                
+            seq_num = struct.unpack('!I', packet[:4])[0]
+            data = packet[4:]
+
+            if f is None:
+                print("==== Start of reception ====")
+                ip, sender_port = addr
+                sender_filename = f"received_{ip.replace('.', '_')}_{sender_port}.jpg"
+                f = open(sender_filename, 'wb')
+                print(f"[*] First packet received from {addr}. File opened for writing as '{sender_filename}'.")
+            
+            if seq_num == exp_num:
                 f.write(data)
-                # print(f"Server received {len(data)} bytes from {addr}") # Optional: noisy
-            if f:
-                f.close()
-            print("==== End of reception ====")
+                exp_num += 1
+                
+            ack= struct.pack('!I', seq_num)
+            sock.sendto(ack, addr)
+
     except KeyboardInterrupt:
+        print("==== End of reception ====")
         print("\n[!] Server stopped manually.")
     except Exception as e:
         print(f"[!] Error: {e}")
     finally:
+        if f:
+            f.close()
         sock.close()
         print("[*] Server socket closed.")
 
